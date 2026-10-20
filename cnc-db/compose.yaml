@@ -1,4 +1,3 @@
-
 services:
   postgres:
     image: postgres:16
@@ -13,6 +12,7 @@ services:
     volumes:
       - pgdata:/var/lib/postgresql/data
       - ./init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+      - ./add_cnc_status.sql:/docker-entrypoint-initdb.d/02-add-cnc-status.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U cnc -d cnc"]
       interval: 10s
