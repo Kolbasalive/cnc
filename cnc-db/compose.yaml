@@ -1,0 +1,25 @@
+
+services:
+  postgres:
+    image: postgres:16
+    container_name: cnc-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: cnc
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: cnc
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U cnc -d cnc"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  pgdata:
+    name: cnc-db_pgdata
+
