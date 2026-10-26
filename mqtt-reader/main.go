@@ -1,4 +1,3 @@
-
 package main
 
 import (
@@ -13,18 +12,26 @@ import (
 	"strings"
 	"syscall"
 	"time"
+	"log"
 
 	mqtt "github.com/eclipse/paho.mqtt.golang"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 const pollInterval = 5 * time.Second
+var logger = log.New(os.Stdout, "", log.LstdFlags)
 
 type CNCResponse struct {
 	Data []json.RawMessage `json:"data"`
 }
 
 type CNCSections map[string]map[string]string
+
+func configureLogging() {
+    if os.Getenv("LOG_ENABLED") == "false" {
+        logger.SetOutput(io.Discard)
+    }
+}
 
 func parseCNCResponse(body []byte) (CNCSections, error) {
 	var response CNCResponse
@@ -96,21 +103,21 @@ func fetchCNC(
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
-		fmt.Printf("HTTP request error: stand=%d error=%v\n", standID, err)
+		logger.Printf("HTTP request error: stand=%d error=%v\n", standID, err)
 		return
 	}
 
 	resp, err := client.Do(req)
 	if err != nil {
 		if ctx.Err() == nil {
-			fmt.Printf("HTTP ERROR: stand=%d error=%v\n", standID, err)
+			logger.Printf("HTTP ERROR: stand=%d error=%v\n", standID, err)
 		}
 		return
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		fmt.Printf("HTTP STATUS ERROR: stand=%d status=%s\n",
+		logger.Printf("HTTP STATUS ERROR: stand=%d status=%s\n",
 			standID, resp.Status)
 		return
 	}
@@ -118,17 +125,17 @@ func fetchCNC(
 	// Ограничиваем размер ответа, чтобы не читать бесконечный поток.
 	body, err := io.ReadAll(io.LimitReader(resp.Body, 2*1024*1024+1))
 	if err != nil {
-		fmt.Printf("HTTP BODY ERROR: stand=%d error=%v\n", standID, err)
+		logger.Printf("HTTP BODY ERROR: stand=%d error=%v\n", standID, err)
 		return
 	}
 	if len(body) > 2*1024*1024 {
-		fmt.Printf("HTTP BODY TOO LARGE: stand=%d\n", standID)
+		logger.Printf("HTTP BODY TOO LARGE: stand=%d\n", standID)
 		return
 	}
 
 	sections, err := parseCNCResponse(body)
 	if err != nil {
-		fmt.Printf("JSON ERROR: stand=%d error=%v\n", standID, err)
+		logger.Printf("JSON ERROR: stand=%d error=%v\n", standID, err)
 		return
 	}
 
@@ -183,12 +190,12 @@ func fetchCNC(
 	)
 	if err != nil {
 		if ctx.Err() == nil {
-			fmt.Printf("DB INSERT ERROR: stand=%d error=%v\n", standID, err)
+			logger.Printf("DB INSERT ERROR: stand=%d error=%v\n", standID, err)
 		}
 		return
 	}
 
-	fmt.Printf(
+	logger.Printf(
 		"CNC SAVED: stand=%d | status=%s | mode=%s | program=%s | progress=%s\n",
 		standID,
 		channel["Статус канала"],
@@ -244,7 +251,7 @@ func pollCNC(ctx context.Context, pool *pgxpool.Pool) {
 	for {
 		select {
 		case <-ctx.Done():
-			fmt.Println("HTTP polling stopped")
+			logger.Println("HTTP polling stopped")
 			return
 		case <-ticker.C:
 			poll()
@@ -253,6 +260,8 @@ func pollCNC(ctx context.Context, pool *pgxpool.Pool) {
 }
 
 func main() {
+	configureLogging()
+
 	ctx, stop := signal.NotifyContext(
 		context.Background(),
 		os.Interrupt,
@@ -263,22 +272,22 @@ func main() {
 	// PostgreSQL
 	databaseURL := os.Getenv("DATABASE_URL")
 	if databaseURL == "" {
-		fmt.Println("db: DATABASE_URL не задана")
+		logger.Println("db: DATABASE_URL не задана")
 		os.Exit(1)
 	}
 
 	pool, err := pgxpool.New(ctx, databaseURL)
 	if err != nil {
-		fmt.Println("db pool:", err)
+		logger.Println("db pool:", err)
 		os.Exit(1)
 	}
 	defer pool.Close()
 
 	if err := pool.Ping(ctx); err != nil {
-		fmt.Println("db ping:", err)
+		logger.Println("db ping:", err)
 		os.Exit(1)
 	}
-	fmt.Println("database connected")
+	logger.Println("database connected")
 
 	// MQTT
 	opts := mqtt.NewClientOptions()
@@ -291,10 +300,10 @@ func main() {
 	client := mqtt.NewClient(opts)
 
 	if token := client.Connect(); token.Wait() && token.Error() != nil {
-		fmt.Println("connect:", token.Error())
+		logger.Println("connect:", token.Error())
 		os.Exit(1)
 	}
-	fmt.Println("mqtt connected")
+	logger.Println("mqtt connected")
 
 	handler := func(_ mqtt.Client, msg mqtt.Message) {
 		receivedAt := time.Now()
@@ -313,11 +322,11 @@ func main() {
 		`, receivedAt, topic, valueNum, valueText)
 
 		if err != nil {
-			fmt.Printf("DB INSERT ERROR: topic=%s error=%v\n", topic, err)
+			logger.Printf("DB INSERT ERROR: topic=%s error=%v\n", topic, err)
 			return
 		}
 
-		fmt.Printf("MQTT SAVED: %s | %s | %s\n",
+		logger.Printf("MQTT SAVED: %s | %s | %s\n",
 			receivedAt.Format(time.RFC3339),
 			topic,
 			valueText,
@@ -333,21 +342,21 @@ func main() {
 
 	for _, topic := range topics {
 		if token := client.Subscribe(topic, 0, handler); token.Wait() && token.Error() != nil {
-			fmt.Println("subscribe:", token.Error())
+			logger.Println("subscribe:", token.Error())
 			client.Disconnect(1000)
 			os.Exit(1)
 		}
-		fmt.Println("subscribed:", topic)
+		logger.Println("subscribed:", topic)
 	}
 
 	// HTTP опрос работает независимо от MQTT.
 	go pollCNC(ctx, pool)
 
-	fmt.Println("CNC HTTP polling started: interval=5s, stands=3,5")
-	fmt.Println("Press Ctrl+C to stop")
+	logger.Println("CNC HTTP polling started: interval=5s, stands=3,5")
+	logger.Println("Press Ctrl+C to stop")
 
 	<-ctx.Done()
 
-	fmt.Println("disconnecting...")
+	logger.Println("disconnecting...")
 	client.Disconnect(1000)
 }
