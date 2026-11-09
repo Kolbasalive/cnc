@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"os"
 	"os/signal"
@@ -12,13 +13,13 @@ import (
 	"strings"
 	"syscall"
 	"time"
-	"log"
 
 	mqtt "github.com/eclipse/paho.mqtt.golang"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 const pollInterval = 5 * time.Second
+
 var logger = log.New(os.Stdout, "", log.LstdFlags)
 
 type CNCResponse struct {
@@ -28,9 +29,9 @@ type CNCResponse struct {
 type CNCSections map[string]map[string]string
 
 func configureLogging() {
-    if os.Getenv("LOG_ENABLED") == "false" {
-        logger.SetOutput(io.Discard)
-    }
+	if os.Getenv("LOG_ENABLED") == "false" {
+		logger.SetOutput(io.Discard)
+	}
 }
 
 func parseCNCResponse(body []byte) (CNCSections, error) {
