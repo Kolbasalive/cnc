@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -13,13 +12,6 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 )
-
-type mqttLatest struct {
-	Topic      string    `json:"topic"`
-	ReceivedAt time.Time `json:"received_at"`
-	ValueNum   *float64  `json:"value_num"`
-	ValueText  string    `json:"value_text"`
-}
 
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -44,17 +36,40 @@ func main() {
 	}
 	fmt.Println("database connected")
 
+	srv := &server{pool: pool}
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /api/mqtt/latest", func(w http.ResponseWriter, r *http.Request) {
-		latestMQTT(w, r, pool)
-	})
+	mux.HandleFunc("GET /openapi.yaml", srv.openAPI)
+	mux.HandleFunc("GET /swagger", srv.swaggerUI)
+	mux.HandleFunc("GET /swagger/", srv.swaggerUI)
+
+	mux.HandleFunc("GET /api/overview", srv.overview)
+
+	mux.HandleFunc("GET /api/mqtt/latest", srv.latestMQTT)
+	mux.HandleFunc("GET /api/mqtt/history", srv.historyMQTT)
+
+	mux.HandleFunc("GET /api/sensors/latest", srv.latestSensors)
+	mux.HandleFunc("GET /api/sensors/history", srv.historySensors)
+
+	mux.HandleFunc("GET /api/demo-lathe/latest", srv.latestLathe)
+	mux.HandleFunc("GET /api/demo-lathe/history", srv.historyLathe)
+
+	mux.HandleFunc("GET /api/cnc/latest", srv.latestCNC)
+	mux.HandleFunc("GET /api/cnc/history", srv.historyCNC)
+
+	mux.HandleFunc("GET /api/analytics/stands/{id}/status", srv.standStatus)
+	mux.HandleFunc("GET /api/analytics/stands/{id}/modes", srv.standModes)
+	mux.HandleFunc("GET /api/analytics/stands/{id}/programs", srv.standPrograms)
+	mux.HandleFunc("GET /api/analytics/stands/{id}/availability", srv.standAvailability)
+	mux.HandleFunc("GET /api/analytics/stands/{id}/errors", srv.standErrors)
+	mux.HandleFunc("GET /api/analytics/demo/programs", srv.demoPrograms)
+	mux.HandleFunc("GET /api/analytics/demo/temp-humidity", srv.demoTempHumidity)
 
 	addr := os.Getenv("ADDR")
 	if addr == "" {
 		addr = "127.0.0.1:8080"
 	}
 
-	server := &http.Server{
+	httpServer := &http.Server{
 		Addr:              addr,
 		Handler:           mux,
 		ReadHeaderTimeout: 5 * time.Second,
@@ -64,59 +79,13 @@ func main() {
 		<-ctx.Done()
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		_ = server.Shutdown(shutdownCtx)
+		_ = httpServer.Shutdown(shutdownCtx)
 	}()
 
 	fmt.Printf("API listening on http://%s\n", addr)
-	if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+	fmt.Printf("Swagger UI: http://%s/swagger\n", addr)
+	if err := httpServer.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		fmt.Println("http:", err)
 		os.Exit(1)
-	}
-}
-
-func latestMQTT(w http.ResponseWriter, r *http.Request, pool *pgxpool.Pool) {
-	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
-	defer cancel()
-
-	rows, err := pool.Query(ctx, `
-		SELECT DISTINCT ON (topic)
-			topic, received_at, value_num, value_text
-		FROM mqtt_messages
-		ORDER BY topic, received_at DESC
-	`)
-	if err != nil {
-		writeError(w, err)
-		return
-	}
-	defer rows.Close()
-
-	items := make([]mqttLatest, 0)
-	for rows.Next() {
-		var item mqttLatest
-		if err := rows.Scan(&item.Topic, &item.ReceivedAt, &item.ValueNum, &item.ValueText); err != nil {
-			writeError(w, err)
-			return
-		}
-		items = append(items, item)
-	}
-	if err := rows.Err(); err != nil {
-		writeError(w, err)
-		return
-	}
-
-	writeJSON(w, http.StatusOK, items)
-}
-
-func writeError(w http.ResponseWriter, err error) {
-	fmt.Println("query:", err)
-	writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "database error"})
-}
-
-func writeJSON(w http.ResponseWriter, status int, value any) {
-	w.Header().Set("Content-Type", "application/json; charset=utf-8")
-	w.Header().Set("Access-Control-Allow-Origin", "*")
-	w.WriteHeader(status)
-	if err := json.NewEncoder(w).Encode(value); err != nil {
-		fmt.Println("encode:", err)
 	}
 }

@@ -1,0 +1,712 @@
+openapi: 3.0.3
+info:
+  title: CNC API
+  version: 1.0.0
+  description: |
+    Данные для дашборда. Время в параметрах from и to — RFC3339.
+    Если период не задан, берутся последние 24 часа.
+    Истории обрезаются на 5000 точек, тогда truncated=true.
+servers:
+  - url: http://127.0.0.1:8080
+paths:
+  /api/overview:
+    get:
+      summary: Сводка для главной страницы
+      responses:
+        "200":
+          description: Последние датчики, сигналы демо-токарного и снимки стендов
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Overview"
+  /api/mqtt/latest:
+    get:
+      summary: Последнее значение каждого MQTT-топика
+      responses:
+        "200":
+          description: Список топиков
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/MqttPoint"
+  /api/mqtt/history:
+    get:
+      summary: История одного MQTT-топика
+      parameters:
+        - $ref: "#/components/parameters/topic"
+        - $ref: "#/components/parameters/from"
+        - $ref: "#/components/parameters/to"
+      responses:
+        "200":
+          description: Точки ряда
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MqttHistory"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+  /api/sensors/latest:
+    get:
+      summary: Последняя температура и влажность
+      responses:
+        "200":
+          description: По одной точке на источник, стенд и метрику
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/SensorPoint"
+  /api/sensors/history:
+    get:
+      summary: История температуры и влажности
+      parameters:
+        - name: source
+          in: query
+          schema:
+            $ref: "#/components/schemas/SensorSource"
+        - name: stand
+          in: query
+          schema:
+            $ref: "#/components/schemas/StandId"
+        - name: metric
+          in: query
+          schema:
+            $ref: "#/components/schemas/SensorMetric"
+        - $ref: "#/components/parameters/from"
+        - $ref: "#/components/parameters/to"
+      responses:
+        "200":
+          description: Точки ряда
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SensorHistory"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+  /api/demo-lathe/latest:
+    get:
+      summary: Последние сигналы демо-токарного
+      responses:
+        "200":
+          description: x, z, program, program_percent
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/LathePoint"
+  /api/demo-lathe/history:
+    get:
+      summary: История одного сигнала демо-токарного
+      parameters:
+        - name: signal
+          in: query
+          required: true
+          schema:
+            $ref: "#/components/schemas/LatheSignal"
+        - $ref: "#/components/parameters/from"
+        - $ref: "#/components/parameters/to"
+      responses:
+        "200":
+          description: Точки ряда
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LatheHistory"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+  /api/cnc/latest:
+    get:
+      summary: Последний снимок стенда
+      description: Без stand возвращает оба стенда.
+      parameters:
+        - $ref: "#/components/parameters/stand"
+      responses:
+        "200":
+          description: Снимки с осями, ошибками и признаком online
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Snapshot"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+  /api/cnc/history:
+    get:
+      summary: История снимков стенда
+      parameters:
+        - $ref: "#/components/parameters/standRequired"
+        - $ref: "#/components/parameters/from"
+        - $ref: "#/components/parameters/to"
+      responses:
+        "200":
+          description: Снимки с осями и ошибками
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SnapshotHistory"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+  /api/analytics/stands/{id}/status:
+    get:
+      summary: Доля времени по статусу канала
+      parameters:
+        - $ref: "#/components/parameters/id"
+        - $ref: "#/components/parameters/from"
+        - $ref: "#/components/parameters/to"
+      responses:
+        "200":
+          description: Секунды и проценты по статусам
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ShareReport"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+  /api/analytics/stands/{id}/modes:
+    get:
+      summary: Доля времени по режиму канала
+      parameters:
+        - $ref: "#/components/parameters/id"
+        - $ref: "#/components/parameters/from"
+        - $ref: "#/components/parameters/to"
+      responses:
+        "200":
+          description: Секунды и проценты по режимам
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ShareReport"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+  /api/analytics/stands/{id}/programs:
+    get:
+      summary: Доля времени по программам стенда
+      parameters:
+        - $ref: "#/components/parameters/id"
+        - $ref: "#/components/parameters/from"
+        - $ref: "#/components/parameters/to"
+      responses:
+        "200":
+          description: Список программ и проценты
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ShareReport"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+  /api/analytics/stands/{id}/availability:
+    get:
+      summary: Сколько стенд был online и offline
+      description: Offline начинается, когда текущее время ядра не меняется дольше минуты.
+      parameters:
+        - $ref: "#/components/parameters/id"
+        - $ref: "#/components/parameters/from"
+        - $ref: "#/components/parameters/to"
+      responses:
+        "200":
+          description: Секунды и проценты online/offline
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AvailabilityReport"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+  /api/analytics/stands/{id}/errors:
+    get:
+      summary: Ошибки стенда с температурой и влажностью
+      parameters:
+        - $ref: "#/components/parameters/id"
+        - $ref: "#/components/parameters/from"
+        - $ref: "#/components/parameters/to"
+      responses:
+        "200":
+          description: Список ошибок
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorReport"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+  /api/analytics/demo/programs:
+    get:
+      summary: Программы демо-токарного и самая длинная
+      parameters:
+        - $ref: "#/components/parameters/from"
+        - $ref: "#/components/parameters/to"
+      responses:
+        "200":
+          description: Доли времени и самый длинный непрерывный запуск
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DemoProgramReport"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+  /api/analytics/demo/temp-humidity:
+    get:
+      summary: Моменты, когда температура демо-ЧПУ равна влажности
+      parameters:
+        - $ref: "#/components/parameters/from"
+        - $ref: "#/components/parameters/to"
+      responses:
+        "200":
+          description: Время и общее значение
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ClimateMatchReport"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+components:
+  parameters:
+    from:
+      name: from
+      in: query
+      schema:
+        type: string
+        format: date-time
+    to:
+      name: to
+      in: query
+      schema:
+        type: string
+        format: date-time
+    topic:
+      name: topic
+      in: query
+      required: true
+      schema:
+        type: string
+      example: sensor/t3
+    stand:
+      name: stand
+      in: query
+      schema:
+        $ref: "#/components/schemas/StandId"
+    standRequired:
+      name: stand
+      in: query
+      required: true
+      schema:
+        $ref: "#/components/schemas/StandId"
+    id:
+      name: id
+      in: path
+      required: true
+      schema:
+        $ref: "#/components/schemas/StandId"
+  responses:
+    BadRequest:
+      description: Неверный параметр
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+  schemas:
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: string
+    StandId:
+      type: integer
+      enum: [3, 5]
+    SensorSource:
+      type: string
+      enum: [demodata, stand, demo_lathe]
+    SensorMetric:
+      type: string
+      enum: [temp, humidity]
+    LatheSignal:
+      type: string
+      enum: [x, z, program, program_percent]
+    MqttPoint:
+      type: object
+      required: [topic, received_at, value_text]
+      properties:
+        topic:
+          type: string
+        received_at:
+          type: string
+          format: date-time
+        value_num:
+          type: number
+          format: double
+          nullable: true
+        value_text:
+          type: string
+    MqttHistory:
+      type: object
+      required: [from, to, truncated, items]
+      properties:
+        from:
+          type: string
+          format: date-time
+        to:
+          type: string
+          format: date-time
+        truncated:
+          type: boolean
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/MqttPoint"
+    SensorPoint:
+      type: object
+      required: [received_at, source, metric, value]
+      properties:
+        received_at:
+          type: string
+          format: date-time
+        source:
+          $ref: "#/components/schemas/SensorSource"
+        stand_id:
+          allOf:
+            - $ref: "#/components/schemas/StandId"
+          nullable: true
+        metric:
+          $ref: "#/components/schemas/SensorMetric"
+        value:
+          type: number
+          format: double
+    SensorHistory:
+      type: object
+      required: [from, to, truncated, items]
+      properties:
+        from:
+          type: string
+          format: date-time
+        to:
+          type: string
+          format: date-time
+        truncated:
+          type: boolean
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/SensorPoint"
+    LathePoint:
+      type: object
+      required: [received_at, signal, value_text]
+      properties:
+        received_at:
+          type: string
+          format: date-time
+        signal:
+          $ref: "#/components/schemas/LatheSignal"
+        value_num:
+          type: number
+          format: double
+          nullable: true
+        value_text:
+          type: string
+    LatheHistory:
+      type: object
+      required: [from, to, truncated, items]
+      properties:
+        from:
+          type: string
+          format: date-time
+        to:
+          type: string
+          format: date-time
+        truncated:
+          type: boolean
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/LathePoint"
+    AxisPoint:
+      type: object
+      required: [channel, axis, position_mm]
+      properties:
+        channel:
+          type: integer
+        axis:
+          type: string
+          example: X
+        position_mm:
+          type: number
+          format: double
+    SnapshotError:
+      type: object
+      required: [channel, code, message, description, action]
+      properties:
+        channel:
+          type: integer
+        code:
+          type: string
+        reported_at:
+          type: string
+          format: date-time
+          nullable: true
+        message:
+          type: string
+        description:
+          type: string
+        action:
+          type: string
+    Snapshot:
+      type: object
+      required:
+        - id
+        - stand_id
+        - received_at
+        - core_runtime_total
+        - core_runtime_current
+        - channel_runtime_total
+        - channel_runtime_current
+        - status
+        - mode
+        - program_time
+        - program_name
+        - online
+        - axes
+        - errors
+      properties:
+        id:
+          type: integer
+          format: int64
+        stand_id:
+          $ref: "#/components/schemas/StandId"
+        received_at:
+          type: string
+          format: date-time
+        core_runtime_total:
+          type: string
+          example: "721:47:42"
+        core_runtime_current:
+          type: string
+        core_restarts:
+          type: integer
+          nullable: true
+        channel_count:
+          type: integer
+          nullable: true
+        channel_runtime_total:
+          type: string
+        channel_runtime_current:
+          type: string
+        status:
+          type: string
+          example: Работа
+        mode:
+          type: string
+          example: Авто
+        program_time:
+          type: string
+        program_percent:
+          type: integer
+          nullable: true
+        program_name:
+          type: string
+        online:
+          type: boolean
+        axes:
+          type: array
+          items:
+            $ref: "#/components/schemas/AxisPoint"
+        errors:
+          type: array
+          items:
+            $ref: "#/components/schemas/SnapshotError"
+    SnapshotHistory:
+      type: object
+      required: [from, to, truncated, items]
+      properties:
+        from:
+          type: string
+          format: date-time
+        to:
+          type: string
+          format: date-time
+        truncated:
+          type: boolean
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Snapshot"
+    Overview:
+      type: object
+      required: [sensors, demo_lathe, stands]
+      properties:
+        sensors:
+          type: array
+          items:
+            $ref: "#/components/schemas/SensorPoint"
+        demo_lathe:
+          type: array
+          items:
+            $ref: "#/components/schemas/LathePoint"
+        stands:
+          type: array
+          items:
+            $ref: "#/components/schemas/Snapshot"
+    ShareItem:
+      type: object
+      required: [label, seconds, percent]
+      properties:
+        label:
+          type: string
+        seconds:
+          type: number
+          format: double
+        percent:
+          type: number
+          format: double
+    ShareReport:
+      type: object
+      required: [stand_id, from, to, total_seconds, items]
+      properties:
+        stand_id:
+          $ref: "#/components/schemas/StandId"
+        from:
+          type: string
+          format: date-time
+        to:
+          type: string
+          format: date-time
+        total_seconds:
+          type: number
+          format: double
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/ShareItem"
+    Segment:
+      type: object
+      required: [label, seconds, started_at, ended_at]
+      properties:
+        label:
+          type: string
+        seconds:
+          type: number
+          format: double
+        started_at:
+          type: string
+          format: date-time
+        ended_at:
+          type: string
+          format: date-time
+    DemoProgramReport:
+      type: object
+      required: [from, to, total_seconds, items]
+      properties:
+        from:
+          type: string
+          format: date-time
+        to:
+          type: string
+          format: date-time
+        total_seconds:
+          type: number
+          format: double
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/ShareItem"
+        longest:
+          allOf:
+            - $ref: "#/components/schemas/Segment"
+          nullable: true
+    AvailabilityReport:
+      type: object
+      required: [stand_id, from, to, online_seconds, offline_seconds, online_percent, offline_percent]
+      properties:
+        stand_id:
+          $ref: "#/components/schemas/StandId"
+        from:
+          type: string
+          format: date-time
+        to:
+          type: string
+          format: date-time
+        online_seconds:
+          type: number
+          format: double
+        offline_seconds:
+          type: number
+          format: double
+        online_percent:
+          type: number
+          format: double
+        offline_percent:
+          type: number
+          format: double
+    ErrorReportItem:
+      type: object
+      required: [received_at, channel, code, message, description, action, program_name]
+      properties:
+        received_at:
+          type: string
+          format: date-time
+        reported_at:
+          type: string
+          format: date-time
+          nullable: true
+        channel:
+          type: integer
+        code:
+          type: string
+        message:
+          type: string
+        description:
+          type: string
+        action:
+          type: string
+        program_name:
+          type: string
+        temperature:
+          type: number
+          format: double
+          nullable: true
+        humidity:
+          type: number
+          format: double
+          nullable: true
+    ErrorReport:
+      type: object
+      required: [stand_id, from, to, items]
+      properties:
+        stand_id:
+          $ref: "#/components/schemas/StandId"
+        from:
+          type: string
+          format: date-time
+        to:
+          type: string
+          format: date-time
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/ErrorReportItem"
+    ClimateMatch:
+      type: object
+      required: [received_at, value]
+      properties:
+        received_at:
+          type: string
+          format: date-time
+        value:
+          type: number
+          format: double
+    ClimateMatchReport:
+      type: object
+      required: [from, to, items]
+      properties:
+        from:
+          type: string
+          format: date-time
+        to:
+          type: string
+          format: date-time
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/ClimateMatch"
