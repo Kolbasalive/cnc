@@ -1,0 +1,62 @@
+# На сервере рядом с этим файлом лежит .env:
+# POSTGRES_PASSWORD=...
+# MQTT_USERNAME=...
+# MQTT_PASSWORD=...
+# В пароле базы не должно быть символов @ : / # ? — они ломают DATABASE_URL.
+
+services:
+  postgres:
+    image: postgres:16
+    container_name: cnc-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: cnc
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: cnc
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./cnc-db/migrations:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U cnc -d cnc"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+  mqtt-reader:
+    build: ./mqtt-reader
+    container_name: cnc-mqtt-reader
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://cnc:${POSTGRES_PASSWORD}@postgres:5432/cnc?sslmode=disable
+      MQTT_USERNAME: ${MQTT_USERNAME:?Set MQTT_USERNAME in .env}
+      MQTT_PASSWORD: ${MQTT_PASSWORD:?Set MQTT_PASSWORD in .env}
+
+  api:
+    build: ./api
+    container_name: cnc-api
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      ADDR: 0.0.0.0:8080
+      DATABASE_URL: postgres://cnc:${POSTGRES_PASSWORD}@postgres:5432/cnc?sslmode=disable
+
+  web:
+    build: ./web
+    container_name: cnc-web
+    restart: unless-stopped
+    depends_on:
+      - api
+    ports:
+      - "80:80"
+
+volumes:
+  pgdata:
+    name: cnc-db_pgdata
