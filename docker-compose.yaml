@@ -24,6 +24,11 @@ services:
       timeout: 5s
       retries: 10
       start_period: 10s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   mqtt-reader:
     build: ./mqtt-reader
@@ -36,6 +41,11 @@ services:
       DATABASE_URL: postgres://cnc:${POSTGRES_PASSWORD}@postgres:5432/cnc?sslmode=disable
       MQTT_USERNAME: ${MQTT_USERNAME:?Set MQTT_USERNAME in .env}
       MQTT_PASSWORD: ${MQTT_PASSWORD:?Set MQTT_PASSWORD in .env}
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   api:
     build: ./api
@@ -47,6 +57,11 @@ services:
     environment:
       ADDR: 0.0.0.0:8080
       DATABASE_URL: postgres://cnc:${POSTGRES_PASSWORD}@postgres:5432/cnc?sslmode=disable
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   web:
     build: ./web
@@ -56,6 +71,16 @@ services:
       - api
     ports:
       - "80:80"
+      - "443:443"
+    volumes:
+      - ./certbot/www:/var/www/certbot:ro
+      - ./certbot/conf:/etc/letsencrypt:ro
+
+  certbot:
+    image: certbot/certbot
+    volumes:
+      - ./certbot/www:/var/www/certbot
+      - ./certbot/conf:/etc/letsencrypt
 
 volumes:
   pgdata:

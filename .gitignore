@@ -15,3 +15,7 @@ mqtt-reader/vendor/
 .DS_Store
 .idea/
 .vscode/
+
+# cert
+certbot/
+
